@@ -166,25 +166,39 @@ Player.prototype.update = function() {
 };
 
 Player.prototype.updateForStreaming = function() {
-	// When streaming, immediately decode everything we have buffered up until
-	// now to minimize playback latency.
 
-	if (this.video) {
-		this.video.decode();
+	var notEnoughData = false
+	if (this.audio && this.audio.canPlay) {
+		// Do we have to decode and enqueue some more audio data?
+		while (
+			!notEnoughData && 
+			this.audio.decodedTime - this.audio.currentTime < 0.25
+		) {
+			notEnoughData = !this.audio.decode();
+		}
+
+		// Sync video to audio
+		if (this.video && this.video.currentTime < this.audio.currentTime) {
+			notEnoughData = !this.video.decode();
+		}
 	}
 
-	if (this.audio) {
-		var decoded = false;
-		do {
-			// If there's a lot of audio enqueued already, disable output and
-			// catch up with the encoding.
-			if (this.audioOut.enqueuedTime > this.maxAudioLag) {
-				this.audioOut.resetEnqueuedTime();
-				this.audioOut.enabled = false;
+
+	else if (this.video) {
+		// Video only - sync it to player's wallclock
+		var targetTime = (JSMpeg.Now() - this.startTime) + this.video.startTime,
+			lateTime = targetTime - this.video.currentTime,
+			frameTime = 1/this.video.frameRate;
+
+		if (this.video && lateTime > 0) {
+			// If the video is too far behind (>2 frames), simply reset the
+			// target time to the next frame instead of trying to catch up.
+			if (lateTime > frameTime * 2) {
+				this.startTime += lateTime;
 			}
-			decoded = this.audio.decode();		
-		} while (decoded);
-		this.audioOut.enabled = true;
+
+			notEnoughData = !this.video.decode();
+		}
 	}
 };
 
